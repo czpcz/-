@@ -1,0 +1,161 @@
+口罩识别有关代码
+
+import sensor, image, lcd, time
+import KPU as kpu
+color_R = (255, 0, 0)
+color_G = (0, 255, 0)
+color_B = (0, 0, 255)
+class_IDs = ['no_mask', 'mask']
+def drawConfidenceText(image, rol, classid, value):
+    text = ""
+    _confidence = int(value * 100)
+    if classid == 1:
+        text = 'mask: ' + str(_confidence) + '%'
+        color_text=color_G
+    else:
+        text = 'no_mask: ' + str(_confidence) + '%'
+        color_text=color_R
+    image.draw_string(rol[0], rol[1], text, color=color_text, scale=2.5)
+lcd.init()
+sensor.reset(dual_buff=True)
+sensor.set_pixformat(sensor.RGB565)
+sensor.set_framesize(sensor.QVGA)
+sensor.set_hmirror(0)
+sensor.run(1)
+task = kpu.load(0x300000)
+
+
+anchor = (0.1606, 0.3562, 0.4712, 0.9568, 0.9877, 1.9108, 1.8761, 3.5310, 3.4423, 5.6823)
+_ = kpu.init_yolo2(task, 0.5, 0.3, 5, anchor)
+img_lcd = image.Image()
+clock = time.clock()
+while (True):
+    clock.tick()
+    img = sensor.snapshot()
+    code = kpu.run_yolo2(task, img)
+    if code:
+        totalRes = len(code)
+        for item in code:
+            confidence = float(item.value())
+            itemROL = item.rect()
+            classID = int(item.classid())
+            if confidence < 0.52:
+                _ = img.draw_rectangle(itemROL, color=color_B, tickness=5)
+                continue
+            if classID == 1 and confidence > 0.65:
+                _ = img.draw_rectangle(itemROL, color_G, tickness=5)
+                if totalRes == 1:
+                    drawConfidenceText(img, (0, 0), 1, confidence)
+            else:
+                _ = img.draw_rectangle(itemROL, color=color_R, tickness=5)
+                if totalRes == 1:
+                    drawConfidenceText(img, (0, 0), 0, confidence)
+    _ = lcd.display(img)
+    print(clock.fps())
+_ = kpu.deinit(task)
+
+主控代码：
+
+import time,board,digitalio,serial,pulseio
+from loongpio import LED
+from time import sleep
+import threading
+
+def key():
+    if btn.value:
+        print("no")
+    else:
+        print("yes")
+def uart1(serial):
+    while True:
+        data=serial.read_all()
+        if data=='':
+            continue
+        else:
+            break
+        sleep(0.02)
+    return data
+def uart2():
+    data=uart1(serial)
+    if data!=b'' :
+        print("receive:",data)
+        serial.write(data)
+        if data==b'0x01\r\n':
+            led1.on()
+        if data==b'0x02\r\n':
+            led1.off()
+def PWMa():#you
+    while True:
+        if btn.value==1 and btn1.value==0 and btn2.value==0:
+            for i in range(100):
+                if i<50:
+                    p11.duty_cycle=int(i*2*65535/100)
+                else:
+                    p11.duty_cycle=65535-int((i-50)*2*65535/100)
+            time.sleep(0.01)
+        if btn.value==1 and btn1.value==1 and btn2.value==0:
+            time.sleep(4)
+            for i in range(100):
+                if i<50:
+                    p11.duty_cycle=int(i*2*65535/100)
+                else:
+                    p11.duty_cycle=65535-int((i-50)*2*65535/100)
+        if btn.value==0:
+            time.sleep(6)
+            for i in range(100):
+                if i<50:
+                    p11.duty_cycle=int(i*2*65535/100)
+                else:
+                    p11.duty_cycle=65535-int((i-50)*2*65535/100)
+            time.sleep(0.01)
+def PWMb():
+    while True:     
+        if btn.value==1 and btn1.value==0 and btn2.value==0:
+            for i in range(100):
+                if i<50:
+                    p22.duty_cycle=int(i*2*65535/100)
+                else:
+                    p22.duty_cycle=65535-int((i-50)*2*65535/100)
+            
+        if btn.value==1 and btn1.value==0 and btn2.value==1:
+            time.sleep(4)
+            for i in range(100):
+                if i<50:
+                    p22.duty_cycle=int(i*2*65535/100)
+                else:
+                    p22.duty_cycle=65535-int((i-50)*2*65535/100)
+        
+
+p11=pulseio.PWMOut(board.PWM0,frequency=5000,duty_cycle=5000)
+p22=pulseio.PWMOut(board.PWM1,frequency=5000,duty_cycle=5000)
+btn=digitalio.DigitalInOut(board.GPIO2)
+btn.direction=digitalio.Direction.INPUT
+
+btn1=digitalio.DigitalInOut(board.GPIO38)  
+btn1.direction=digitalio.Direction.INPUT
+
+btn2=digitalio.DigitalInOut(board.GPIO41)   
+btn2.direction=digitalio.Direction.INPUT
+
+
+led1=LED(7)
+led2=LED(1)
+led2.on()
+led3=LED(4)
+
+serial=serial.Serial('/dev/ttyUSB0',115200,timeout=0.5)
+if serial.isOpen():
+    print("open success")
+else:
+    print("open false")
+
+if __name__=='__main__':
+    p1=threading.Thread(target=PWMa)
+    p2=threading.Thread(target=PWMb)
+    p1.start()
+    p2.start()
+    while True:
+        key()
+        data=uart1(serial)
+        uart2()
+
